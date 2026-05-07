@@ -15,23 +15,25 @@ class ConcatLeftAlign:
 
     def set_shape_meta(self, shape_meta):
         self.action_meta = shape_meta["action"]
-        self.state_meta = shape_meta["state"]
+        self.state_meta = shape_meta.get("state", [])
 
     def forward(self, batch):
         if "action" in batch:
             batch["action"] = self._concat(batch["action"], self.action_meta)
             batch["action"], batch["action_dim_is_pad"] = self._pad(batch["action"], self.action_target_dim)
 
-        batch["state"] = self._concat(batch["state"], self.state_meta)
-        batch["state"], batch["state_dim_is_pad"] = self._pad(batch["state"], self.state_target_dim)
+        if self.state_meta:
+            batch["state"] = self._concat(batch["state"], self.state_meta)
+            batch["state"], batch["state_dim_is_pad"] = self._pad(batch["state"], self.state_target_dim)
 
         return batch
 
     def backward(self, batch):
-        if self.state_target_dim is not None:
+        if self.state_meta and "state" in batch and self.state_target_dim is not None:
             assert batch["state"].shape[-1] == self.state_target_dim
-        batch["state"] = self._crop(batch["state"], self.state_meta)
-        batch["state"] = self._split(batch["state"], self.state_meta)
+        if self.state_meta and "state" in batch:
+            batch["state"] = self._crop(batch["state"], self.state_meta)
+            batch["state"] = self._split(batch["state"], self.state_meta)
         
         if self.action_target_dim is not None:
             assert batch["action"].shape[-1] == self.action_target_dim

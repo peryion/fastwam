@@ -16,7 +16,7 @@ class BaseProcessor(ABC):
         num_obs_steps: int,
         num_output_cameras: int, 
         action_output_dim: int,
-        proprio_output_dim: int,
+        proprio_output_dim: Optional[int],
 
         action_state_transforms: Optional[List[Any]], 
 
@@ -129,7 +129,7 @@ class BaseProcessor(ABC):
                 assert actual_shape == meta_shape, \
                     f"Action key {k} actual raw shape {actual_shape} mismatch with meta raw shape {meta_shape}."
                     
-        for meta in self.shape_meta["state"]:
+        for meta in self.shape_meta.get("state", []):
             k, meta_shape = meta["key"], meta["raw_shape"]
             actual_shape = batch["state"][k].shape[-1]
             assert actual_shape == meta_shape, \
@@ -146,7 +146,7 @@ class BaseProcessor(ABC):
                 assert actual_shape == meta_shape, \
                     f"Action key {k} actual transformed shape {actual_shape} mismatch with meta shape {meta_shape}."
         
-        for meta in self.shape_meta["state"]:
+        for meta in self.shape_meta.get("state", []):
             k, meta_shape = meta["key"], meta["shape"]
             actual_shape = batch["state"][k].shape[-1]
             assert actual_shape == meta_shape, \
@@ -229,10 +229,11 @@ class BaseProcessor(ABC):
             assert sample["action"].shape[-1] == self.action_output_dim
         
         # TODO: rename all "state" into "proprio"
-        sample["proprio"] = data["state"] # [num_obs_steps, proprio_dim]
-        sample["proprio_is_pad"] = data["state_is_pad"] # [num_obs_steps,]
-        sample["proprio_dim_is_pad"] = data["state_dim_is_pad"] # [proprio_dim,]
-        assert sample["proprio"].shape[-1] == self.proprio_output_dim
+        if self.shape_meta.get("state", []):
+            sample["proprio"] = data["state"] # [num_obs_steps, proprio_dim]
+            sample["proprio_is_pad"] = data["state_is_pad"] # [num_obs_steps,]
+            sample["proprio_dim_is_pad"] = data["state_dim_is_pad"] # [proprio_dim,]
+            assert sample["proprio"].shape[-1] == self.proprio_output_dim
 
         sample["idx"] = data["idx"]
 
@@ -251,7 +252,8 @@ class BaseProcessor(ABC):
             data: Dict[str, Any], processed data including unnormalized action
         """
         assert "action" in data, "Action is required in postprocess"
-        data["state"] = data.pop("proprio")
+        if "proprio" in data:
+            data["state"] = data.pop("proprio")
         data = self.action_state_merger.backward(data)
         data = self.normalizer.backward(data)
         if self.action_state_transforms is not None:

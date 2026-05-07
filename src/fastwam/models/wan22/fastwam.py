@@ -36,6 +36,7 @@ class FastWAM(torch.nn.Module):
         action_train_shift: float = 5.0,
         action_infer_shift: float = 5.0,
         action_num_train_timesteps: int = 1000,
+        video_attends_action: bool = False,
         loss_lambda_video: float = 1.0,
         loss_lambda_action: float = 1.0,
     ):
@@ -82,6 +83,7 @@ class FastWAM(torch.nn.Module):
 
         self.device = torch.device(device)
         self.torch_dtype = torch_dtype
+        self.video_attends_action = bool(video_attends_action)
         self.loss_lambda_video = float(loss_lambda_video)
         self.loss_lambda_action = float(loss_lambda_action)
 
@@ -109,6 +111,7 @@ class FastWAM(torch.nn.Module):
         action_train_shift: float = 5.0,
         action_infer_shift: float = 5.0,
         action_num_train_timesteps: int = 1000,
+        video_attends_action: bool = False,
         loss_lambda_video: float = 1.0,
         loss_lambda_action: float = 1.0,
     ):
@@ -166,6 +169,7 @@ class FastWAM(torch.nn.Module):
             action_train_shift=action_train_shift,
             action_infer_shift=action_infer_shift,
             action_num_train_timesteps=action_num_train_timesteps,
+            video_attends_action=video_attends_action,
             loss_lambda_video=loss_lambda_video,
             loss_lambda_action=loss_lambda_action,
         )
@@ -399,6 +403,9 @@ class FastWAM(torch.nn.Module):
             video_tokens_per_frame=video_tokens_per_frame,
             device=device,
         )
+        # video -> action
+        if self.video_attends_action:
+            mask[:video_seq_len, video_seq_len:] = True
         # action -> action
         mask[video_seq_len:, video_seq_len:] = True
         # action -> first-frame video only
@@ -920,6 +927,12 @@ class FastWAM(torch.nn.Module):
         tiled: bool = False,
     ) -> dict[str, Any]:
         self.eval()
+        if self.video_attends_action:
+            raise ValueError(
+                "`FastWAM.infer_action` cannot use the video KV cache when "
+                "`video_attends_action=True`. Use `FastWAMJoint.infer_action` "
+                "or `infer_joint` so video/action are denoised together."
+            )
         if str(getattr(self.video_expert, "video_attention_mask_mode", "")) != "first_frame_causal":
             raise ValueError(
                 "`infer_action` requires `video_attention_mask_mode='first_frame_causal'`."

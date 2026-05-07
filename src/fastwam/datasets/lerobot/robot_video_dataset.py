@@ -123,13 +123,13 @@ class RobotVideoDataset(torch.utils.data.Dataset):
 
             action_is_pad = sample["action_is_pad"]
             image_is_pad = sample["image_is_pad"]
-            proprio_is_pad = sample["proprio_is_pad"]
+            proprio_is_pad = sample.get("proprio_is_pad")
             has_pad = False
             if bool(action_is_pad.any().item()):
                 has_pad = True
             if bool(image_is_pad.any().item()):
                 has_pad = True
-            if bool(proprio_is_pad.any().item()):
+            if proprio_is_pad is not None and bool(proprio_is_pad.any().item()):
                 has_pad = True
 
             if not has_pad or attempt >= self.max_padding_retry:
@@ -200,7 +200,7 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         #   action: [num_frames-1, action_dim] # start from t0, except the last frame
         #   proprio: [num_frames, proprio_dim] # start from t0 to the last frame, aligned with video frames
         action = sample["action"] # [T-1, action_dim]
-        proprio = sample["proprio"][:-1, :] # [T-1, state_dim]， to align with action
+        proprio = sample["proprio"][:-1, :] if "proprio" in sample else None # [T-1, state_dim]， to align with action
         if video.shape[1] <= 1:
             raise ValueError(f"`video` must have at least 2 frames, got shape {tuple(video.shape)}")
         if action.shape[0] % (video.shape[1] - 1) != 0:
@@ -223,14 +223,15 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         data = {
             "video": video,
             "action": action,
-            "proprio": proprio,
             "prompt": instruction,
             "context": context,
             "context_mask": context_mask,
             "image_is_pad": image_is_pad,
             "action_is_pad": sample["action_is_pad"],
-            "proprio_is_pad": sample["proprio_is_pad"],
         }
+        if proprio is not None:
+            data["proprio"] = proprio
+            data["proprio_is_pad"] = sample["proprio_is_pad"]
         return data
 
     def _get_cached_text_context(self, prompt: str):

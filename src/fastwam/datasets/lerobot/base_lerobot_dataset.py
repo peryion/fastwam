@@ -15,6 +15,17 @@ logger = get_logger(__name__)
 MAX_GETITEM_ATTEMPT = 5
 
 class BaseLerobotDataset(torch.utils.data.Dataset):
+    @staticmethod
+    def _resolve_feature_key(metas, candidates: List[str]) -> str:
+        for candidate in candidates:
+            if all(candidate in meta.features for meta in metas):
+                return candidate
+        feature_union = sorted({key for meta in metas for key in meta.features})
+        raise KeyError(
+            f"None of the candidate feature keys {candidates} exist across all datasets. "
+            f"Available features include: {feature_union}"
+        )
+
     def __init__(
         self,
         dataset_dirs: List[str],
@@ -62,27 +73,38 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         self.is_training_set = is_training_set
 
         self.image_meta = shape_meta["images"]
-        self.state_meta = shape_meta["state"]
+        self.state_meta = shape_meta.get("state", [])
         self.action_meta = shape_meta["action"]
 
         delta_timestamps = {}
         for meta in self.image_meta:
             key = meta["key"]
-            meta["lerobot_key"] = f"observation.images.{key}" if key != "default" else "observation.images"
+            image_candidates = (
+                [f"observation.images.{key}", f"images.{key}"]
+                if key != "default"
+                else ["observation.images", "images"]
+            )
+            meta["lerobot_key"] = self._resolve_feature_key(metas, image_candidates)
             delta_timestamps[meta["lerobot_key"]] = [
                 (t * global_sample_stride) / fps for t in range(-past_obs_size, -past_obs_size + obs_size)
             ]
         
         for meta in self.state_meta:
             key = meta["key"]
-            meta["lerobot_key"] = f"observation.state.{key}" if key != "default" else "observation.state"
+            state_candidates = (
+                [f"observation.state.{key}", f"observation.states.{key}", f"state.{key}", f"states.{key}"]
+                if key != "default"
+                else ["observation.state", "observation.states", "state", "states"]
+            )
+            meta["lerobot_key"] = self._resolve_feature_key(metas, state_candidates)
             delta_timestamps[meta["lerobot_key"]] = [
                 (t * global_sample_stride) / fps for t in range(-past_obs_size, -past_obs_size + obs_size)
             ]
         
         for meta in self.action_meta:
             key = meta["key"]
-            meta["lerobot_key"] = f"action.{key}" if key != "default" else "action"
+            action_candidates = [f"action.{key}", key] if key != "default" else ["action"]
+            meta["lerobot_key"] = self._resolve_feature_key(metas, action_candidates)
             delta_timestamps[meta["lerobot_key"]] = [(t * global_sample_stride) / fps for t in range(-past_action_size, -past_action_size + action_size)]
 
         episodes = {}
@@ -151,6 +173,11 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         return image
     
     def _split_lerobot_sample(self, lerobot_sample) -> Dict[str, Any]:
+        if "observation.state" not in lerobot_sample:
+            if "observation.states" in lerobot_sample:
+                lerobot_sample["observation.state"] = lerobot_sample["observation.states"]
+            elif "states" in lerobot_sample:
+                lerobot_sample["observation.state"] = lerobot_sample["states"]
         return lerobot_sample
     
     def _get_episode_data(self, episode_idx):
@@ -223,7 +250,8 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
             sample["images"][meta["key"]] = self._get_image(meta, lerobot_sample)
 
         sample["action_is_pad"] = lerobot_sample[f"{self.action_meta[0]['lerobot_key']}_is_pad"]
-        sample["state_is_pad"] = lerobot_sample[f"{self.state_meta[0]['lerobot_key']}_is_pad"]
+        if self.state_meta:
+            sample["state_is_pad"] = lerobot_sample[f"{self.state_meta[0]['lerobot_key']}_is_pad"]
         sample["image_is_pad"] = lerobot_sample[f"{self.image_meta[0]['lerobot_key']}_is_pad"]
 
         sample = self._get_additional_data(sample, lerobot_sample)

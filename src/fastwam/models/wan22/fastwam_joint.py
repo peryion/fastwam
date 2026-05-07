@@ -42,6 +42,9 @@ class FastWAMJoint(FastWAM):
             video_tokens_per_frame=video_tokens_per_frame,
             device=device,
         )
+        # video -> action
+        if self.video_attends_action:
+            mask[:video_seq_len, video_seq_len:] = True
         # action -> action
         mask[video_seq_len:, video_seq_len:] = True
         # action -> full video
