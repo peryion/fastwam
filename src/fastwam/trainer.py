@@ -3,6 +3,7 @@ import json
 import inspect
 import os
 import re
+import shutil
 from math import ceil
 from pathlib import Path
 import time
@@ -41,6 +42,11 @@ class Wan22Trainer:
         self.max_steps = int(max_steps) if max_steps is not None else None
         self.log_every = int(cfg.log_every)
         self.save_every = int(cfg.save_every)
+        keep_last_checkpoints = cfg.get("keep_last_checkpoints", None)
+        self.keep_last_checkpoints = None if keep_last_checkpoints is None else int(keep_last_checkpoints)
+        if self.keep_last_checkpoints is not None and self.keep_last_checkpoints < 1:
+            raise ValueError("`keep_last_checkpoints` must be null or >= 1.")
+        self.save_final_checkpoint = bool(cfg.get("save_final_checkpoint", True))
         self.eval_every = int(cfg.eval_every)
         self.eval_num_inference_steps = int(cfg.eval_num_inference_steps)
         self.gradient_accumulation_steps = int(cfg.gradient_accumulation_steps)
@@ -441,15 +447,16 @@ class Wan22Trainer:
         action_l1 = None
         action_l2 = None
         if action is not None and pred_action is not None:
-            if sample["proprio"] is None:
-                raise ValueError("Eval sample must contain `proprio` for action denormalization.")
-            proprio = sample["proprio"].detach().to(device="cpu", dtype=torch.float32)
-            
             processor = self.val_dataset.lerobot_dataset.processor
 
             denorm_actions = {}
             action_meta = processor.shape_meta["action"]
-            state_meta = processor.shape_meta["state"]
+            state_meta = processor.shape_meta.get("state", [])
+            proprio = None
+            if state_meta:
+                if sample.get("proprio") is None:
+                    raise ValueError("Eval sample must contain `proprio` for action denormalization when state is configured.")
+                proprio = sample["proprio"].detach().to(device="cpu", dtype=torch.float32)
             for action_name, raw_action in (("pred", pred_action), ("gt", action)):
                 if not isinstance(raw_action, torch.Tensor):
                     raise TypeError(f"{action_name} action must be a torch.Tensor, got {type(raw_action)}")
@@ -465,13 +472,17 @@ class Wan22Trainer:
 
                 batch = {
                     "action": action_btd,
-                    "state": proprio,
                 }
+                if proprio is not None:
+                    batch["state"] = proprio
                 batch = processor.action_state_merger.backward(batch)
                 batch = processor.normalizer.backward(batch)
                 merged_batch = {
                     "action": {meta["key"]: batch["action"][meta["key"]].squeeze(0) for meta in action_meta},
-                    "state": {meta["key"]: batch["state"][meta["key"]].squeeze(0) for meta in state_meta},
+                    "state": {
+                        meta["key"]: batch["state"][meta["key"]].squeeze(0)
+                        for meta in state_meta
+                    } if state_meta else {},
                 }
                 merged_batch = processor.action_state_merger.forward(merged_batch)
                 denorm_action = merged_batch["action"].unsqueeze(0)
@@ -594,9 +605,34 @@ class Wan22Trainer:
         self.accelerator.save_state(output_dir=state_path)
         if self.accelerator.is_main_process:
             self._save_trainer_state(state_path)
+            self._prune_old_checkpoints()
         self.accelerator.wait_for_everyone()
 
         return {"weights_path": ckpt_path, "state_path": state_path}
+
+    def _prune_old_checkpoints(self):
+        if self.keep_last_checkpoints is None:
+            return
+
+        def step_number(path: Path) -> int:
+            match = re.search(r"step[_-](\d+)", path.stem if path.is_file() else path.name)
+            return int(match.group(1)) if match else -1
+
+        weight_paths = sorted(Path(self.weights_dir).glob("step_*.pt"), key=step_number)
+        for path in weight_paths[:-self.keep_last_checkpoints]:
+            try:
+                path.unlink()
+                logger.info("[ckpt] pruned old weights checkpoint: %s", path)
+            except FileNotFoundError:
+                pass
+
+        state_paths = sorted([p for p in Path(self.state_dir).glob("step_*") if p.is_dir()], key=step_number)
+        for path in state_paths[:-self.keep_last_checkpoints]:
+            try:
+                shutil.rmtree(path)
+                logger.info("[ckpt] pruned old state checkpoint: %s", path)
+            except FileNotFoundError:
+                pass
 
     def load_training_state(self, state_dir: str):
         self.accelerator.load_state(input_dir=state_dir)
@@ -770,22 +806,28 @@ class Wan22Trainer:
                             )
 
                     if self.global_step >= self.max_steps:
-                        ckpt_info = self.save_checkpoint()
-                        if self.accelerator.is_main_process:
-                            logger.info(
-                                "[done] max_steps reached step=%d weights=%s state=%s",
-                                self.global_step,
-                                ckpt_info["weights_path"],
-                                ckpt_info["state_path"],
-                            )
+                        if self.save_final_checkpoint:
+                            ckpt_info = self.save_checkpoint()
+                            if self.accelerator.is_main_process:
+                                logger.info(
+                                    "[done] max_steps reached step=%d weights=%s state=%s",
+                                    self.global_step,
+                                    ckpt_info["weights_path"],
+                                    ckpt_info["state_path"],
+                                )
+                        elif self.accelerator.is_main_process:
+                            logger.info("[done] max_steps reached step=%d; final checkpoint skipped.", self.global_step)
                         return
 
-        ckpt_info = self.save_checkpoint()
-        if self.accelerator.is_main_process:
-            logger.info(
-                "[done] training finished step=%d weights=%s state=%s",
-                self.global_step,
-                ckpt_info["weights_path"],
-                ckpt_info["state_path"],
-            )
+        if self.save_final_checkpoint:
+            ckpt_info = self.save_checkpoint()
+            if self.accelerator.is_main_process:
+                logger.info(
+                    "[done] training finished step=%d weights=%s state=%s",
+                    self.global_step,
+                    ckpt_info["weights_path"],
+                    ckpt_info["state_path"],
+                )
+        elif self.accelerator.is_main_process:
+            logger.info("[done] training finished step=%d; final checkpoint skipped.", self.global_step)
         

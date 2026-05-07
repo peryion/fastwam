@@ -19,7 +19,7 @@ class FastWAMProcessor(BaseProcessor):
         num_obs_steps: int,
         num_output_cameras: int, 
         action_output_dim: int,
-        proprio_output_dim: int,
+        proprio_output_dim: Optional[int],
 
         action_state_transforms: Optional[List[Any]], 
 
@@ -154,7 +154,7 @@ class FastWAMProcessor(BaseProcessor):
                 assert actual_shape == meta_shape, \
                     f"Action key {k} actual raw shape {actual_shape} mismatch with meta raw shape {meta_shape}."
                     
-        for meta in self.shape_meta["state"]:
+        for meta in self.shape_meta.get("state", []):
             k, meta_shape = meta["key"], meta["raw_shape"]
             actual_shape = batch["state"][k].shape[-1]
             assert actual_shape == meta_shape, \
@@ -171,7 +171,7 @@ class FastWAMProcessor(BaseProcessor):
                 assert actual_shape == meta_shape, \
                     f"Action key {k} actual transformed shape {actual_shape} mismatch with meta shape {meta_shape}."
         
-        for meta in self.shape_meta["state"]:
+        for meta in self.shape_meta.get("state", []):
             k, meta_shape = meta["key"], meta["shape"]
             actual_shape = batch["state"][k].shape[-1]
             assert actual_shape == meta_shape, \
@@ -257,6 +257,7 @@ class FastWAMProcessor(BaseProcessor):
                     cur_dim_mask = dim_mask.to(device=cur_action.device)
                     pad_delta_mask = cur_action_is_pad.unsqueeze(1) & cur_dim_mask.unsqueeze(0)
                     cur_action[pad_delta_mask] = 0.0
+        has_state = bool(self.shape_meta.get("state", []))
         data = self.action_state_transform(data)
         data = self.normalizer.forward(data)
         data = self.action_state_merger.forward(data)
@@ -270,10 +271,12 @@ class FastWAMProcessor(BaseProcessor):
 
         
         # TODO: rename all "state" into "proprio"
-        sample["proprio"] = data["state"] # [num_obs_steps, proprio_dim]
-        sample["proprio_is_pad"] = data["state_is_pad"] # [num_obs_steps,]
-        sample["proprio_dim_is_pad"] = data["state_dim_is_pad"] # [proprio_dim,]
-        assert sample["proprio"].shape[-1] == self.proprio_output_dim
+        if has_state:
+            sample["proprio"] = data["state"] # [num_obs_steps, proprio_dim]
+            sample["proprio_is_pad"] = data["state_is_pad"] # [num_obs_steps,]
+            sample["proprio_dim_is_pad"] = data["state_dim_is_pad"] # [proprio_dim,]
+            assert self.proprio_output_dim is not None
+            assert sample["proprio"].shape[-1] == self.proprio_output_dim
 
         sample["idx"] = data["idx"]
 
@@ -292,7 +295,8 @@ class FastWAMProcessor(BaseProcessor):
             data: Dict[str, Any], processed data including unnormalized action
         """
         assert "action" in data, "Action is required in postprocess"
-        data["state"] = data.pop("proprio")
+        if "proprio" in data:
+            data["state"] = data.pop("proprio")
         data = self.action_state_merger.backward(data)
         data = self.normalizer.backward(data)
         if self.action_state_transforms is not None:

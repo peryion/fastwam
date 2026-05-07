@@ -47,7 +47,7 @@ class LinearNormalizer:
                 mode=cur_mode,
             )
 
-        for meta in shape_meta["state"]:
+        for meta in shape_meta.get("state", []):
             key = meta["key"]
             cur_stats = {k.removeprefix("global_"): v for k, v in stats["state"][key].items() if k.startswith("global_")}
 

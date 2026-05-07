@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+_REPO_SRC = Path(__file__).resolve().parents[1] / "src"
+if _REPO_SRC.is_dir():
+    sys.path.insert(0, str(_REPO_SRC))
+
 import hydra
 from omegaconf import DictConfig
 
