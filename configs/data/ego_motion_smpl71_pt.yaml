@@ -1,7 +1,7 @@
 train:
   _target_: fastwam.datasets.lerobot.robot_video_dataset.RobotVideoDataset
   dataset_dirs:
-    - /share/project/zhipy/datasets/wam_realdataset/PT_all_train
+    - /home/zhipy/Documents/dataset/wam/lerobot_data/PT_all_val/
   shape_meta:
     images:
       - key: egocentric
@@ -53,7 +53,7 @@ train:
 val:
   _target_: fastwam.datasets.lerobot.robot_video_dataset.RobotVideoDataset
   dataset_dirs:
-    - /share/project/zhipy/datasets/wam_realdataset/PT_all_val
+    - /home/zhipy/Documents/dataset/wam/lerobot_data/PT_all_val/
   shape_meta:
     images:
       - key: egocentric

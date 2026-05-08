@@ -471,7 +471,7 @@ def main():
     parser.add_argument("--replan-steps", type=int, default=None, help="When using --episode-index, re-run inference every N steps and stitch the first N predicted actions from each chunk.")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--mixed-precision", choices=["no", "fp16", "bf16"], default="bf16")
-    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inference-steps", type=int, default=10, help="Diffusion inference steps for model.infer.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--rand-device", default="cpu")
     parser.add_argument("--render-smpl", action="store_true")
@@ -501,6 +501,7 @@ def main():
         "task": args.task,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "split": args.split,
+        "num_inference_steps": int(args.num_inference_steps),
     }
 
     if args.episode_index is None:
@@ -520,7 +521,7 @@ def main():
         print(
             f"[infer_ego] split={args.split} sample_index={int(args.sample_index)} "
             f"-> split_episode_index={resolved_episode_index}, raw_episode_index={raw_episode_index}, "
-            f"frame_in_episode={frame_in_episode}"
+            f"frame_in_episode={frame_in_episode}, num_inference_steps={int(args.num_inference_steps)}"
         )
 
         pred_action_denorm = result["pred_action_denorm"]
@@ -574,7 +575,8 @@ def main():
     episode_dir.mkdir(parents=True, exist_ok=True)
     print(
         f"[infer_ego] split={args.split} split_episode_index={ep_idx} "
-        f"-> raw_episode_index={raw_episode_index} (repo={source_repo_id})"
+        f"-> raw_episode_index={raw_episode_index} (repo={source_repo_id}), "
+        f"num_inference_steps={int(args.num_inference_steps)}"
     )
 
     step_records = []

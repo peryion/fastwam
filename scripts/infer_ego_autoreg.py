@@ -54,7 +54,7 @@ def main():
     parser.add_argument("--episode-index", type=int, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--mixed-precision", choices=["no", "fp16", "bf16"], default="bf16")
-    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inference-steps", type=int, default=20, help="Diffusion inference steps for model.infer.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--rand-device", default="cpu")
     parser.add_argument("--save-per-step-videos", action="store_true")
@@ -85,6 +85,7 @@ def main():
     print(f"[infer_ego_autoreg] dataset_dirs={dataset_dirs}")
     if episode_data_path is not None:
         print(f"[infer_ego_autoreg] episode_data_path={episode_data_path}")
+    print(f"[infer_ego_autoreg] num_inference_steps={int(args.num_inference_steps)}")
 
     ep_from = int(dataset.lerobot_dataset.episode_data_index["from"][ep_idx].item())
     ep_to = int(dataset.lerobot_dataset.episode_data_index["to"][ep_idx].item())
@@ -203,6 +204,7 @@ def main():
         "task": args.task,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "split": args.split,
+        "num_inference_steps": int(args.num_inference_steps),
         "episode_index": ep_idx,
         "episode_start_index": ep_from,
         "episode_end_index_exclusive": ep_to,
